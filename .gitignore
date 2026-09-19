@@ -1,0 +1,12 @@
+# secrets / local state
+.env
+data/
+
+# debug captures (HARs etc. can contain live credentials/tokens — never commit)
+dev/
+*.har
+
+# python
+__pycache__/
+*.pyc
+.venv/
