@@ -1,5 +1,6 @@
 # secrets / local state
 .env
+AGENTS.md
 data/
 
 # debug captures (HARs etc. can contain live credentials/tokens — never commit)

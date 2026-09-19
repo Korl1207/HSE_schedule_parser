@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS lessons (
     content_hash        TEXT NOT NULL,
     google_event_id     TEXT,
     synced_content_hash TEXT,
+    is_day_first        INTEGER NOT NULL DEFAULT 0,
+    synced_is_day_first INTEGER,
     is_deleted          INTEGER NOT NULL DEFAULT 0,
     first_seen_at       TEXT NOT NULL,
     updated_at          TEXT NOT NULL
@@ -46,10 +48,29 @@ class SyncResult:
     unchanged: int
 
 
+# Columns added after the table's initial creation — new installs get them
+# via _SCHEMA already, this lets existing databases catch up in place.
+_ADDED_COLUMNS = {
+    "is_day_first": "ALTER TABLE lessons ADD COLUMN is_day_first INTEGER NOT NULL DEFAULT 0",
+    "synced_is_day_first": "ALTER TABLE lessons ADD COLUMN synced_is_day_first INTEGER",
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(lessons)")}
+    for column, ddl in _ADDED_COLUMNS.items():
+        if column not in existing:
+            conn.execute(ddl)
+    conn.commit()
+
+
 def connect(db_path: Path) -> sqlite3.Connection:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
+    _migrate(conn)
     return conn
 
 
@@ -137,22 +158,69 @@ def upsert_week(conn: sqlite3.Connection, lessons: list[Lesson], monday: date, s
     return SyncResult(added=added, updated=updated, removed=removed, unchanged=unchanged)
 
 
-def mark_synced(conn: sqlite3.Connection, slot_id: str, google_event_id: str, content_hash: str) -> None:
+def mark_synced(
+    conn: sqlite3.Connection,
+    slot_id: str,
+    google_event_id: str,
+    content_hash: str,
+    is_day_first: bool,
+) -> None:
     """Call after successfully creating/updating the Google Calendar event
     for this lesson, so it's not picked up again until it changes further."""
     conn.execute(
-        "UPDATE lessons SET google_event_id = ?, synced_content_hash = ? WHERE slot_id = ?",
-        (google_event_id, content_hash, slot_id),
+        "UPDATE lessons SET google_event_id = ?, synced_content_hash = ?, "
+        "synced_is_day_first = ? WHERE slot_id = ?",
+        (google_event_id, content_hash, int(is_day_first), slot_id),
+    )
+    conn.commit()
+
+
+def clear_google_event(conn: sqlite3.Connection, slot_id: str) -> None:
+    """Call after successfully deleting the Google Calendar event for a
+    lesson that's been marked removed, so it stops showing up as pending."""
+    conn.execute(
+        "UPDATE lessons SET google_event_id = NULL, synced_content_hash = NULL, "
+        "synced_is_day_first = NULL WHERE slot_id = ?",
+        (slot_id,),
+    )
+    conn.commit()
+
+
+def recompute_day_first(conn: sqlite3.Connection) -> None:
+    """Flags, among the currently active lessons, the earliest one on each
+    date as is_day_first — used to decide which single event of the day
+    should carry the "leave home" reminder. Ties (two lessons starting at
+    the same time) are broken by slot_id, arbitrarily but stably."""
+    conn.execute("UPDATE lessons SET is_day_first = 0 WHERE is_deleted = 0")
+    conn.execute(
+        """
+        UPDATE lessons SET is_day_first = 1
+        WHERE is_deleted = 0 AND slot_id IN (
+            SELECT slot_id FROM (
+                SELECT slot_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY date ORDER BY begin_time ASC, slot_id ASC
+                       ) AS rn
+                FROM lessons
+                WHERE is_deleted = 0
+            )
+            WHERE rn = 1
+        )
+        """
     )
     conn.commit()
 
 
 def pending_calendar_changes(conn: sqlite3.Connection) -> sqlite3.Cursor:
-    """Rows that the (future) calendar sync step needs to act on: lessons
-    that are new, changed since their last sync, or removed but still have
-    a Google event to delete."""
+    """Rows that the calendar sync step needs to act on: lessons that are
+    new, changed since their last sync (content or day-first reminder), or
+    removed but still have a Google event to delete."""
     return conn.execute(
         "SELECT * FROM lessons WHERE "
-        "(is_deleted = 0 AND (google_event_id IS NULL OR synced_content_hash != content_hash)) OR "
+        "(is_deleted = 0 AND ("
+        "   google_event_id IS NULL"
+        "   OR synced_content_hash != content_hash"
+        "   OR synced_is_day_first IS NOT is_day_first"
+        ")) OR "
         "(is_deleted = 1 AND google_event_id IS NOT NULL)"
     )
