@@ -1,5 +1,6 @@
 requests>=2.31
 python-dotenv>=1.0
+PySocks>=1.7  # needed for socks5h:// proxy support (auth.py -> saml.hse.ru, when direct access is blocked)
 google-auth>=2.29
 google-auth-oauthlib>=1.2
 google-api-python-client>=2.126
