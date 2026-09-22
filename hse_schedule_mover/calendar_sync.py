@@ -5,12 +5,15 @@ outside events it created itself.
 Design choices (see conversation / README for the full reasoning):
   - a separate calendar, not the primary one, is the isolation boundary
   - real timed Events (not Tasks) — classes have a fixed start/end
-  - location: full HSE-provided address for offline, "Онлайн" for remote
+  - location: just the auditorium for offline, "Онлайн" for remote
   - description: lecturer / group / type, plus the meeting link if remote
   - colorId: one color for offline, another for online lessons
-  - reminders: only the earliest lesson of each day gets a popup reminder
-    (90 min ahead if offline, 30 min if online); every other lesson that
-    day gets none, so the bot doesn't spam a popup per class
+  - reminders: the earliest lesson of each day gets a popup reminder
+    90 min ahead if offline, 30 min if online. For online lessons that
+    aren't the first of the day there's no reminder, so the bot doesn't
+    spam a popup per class. For offline lessons that aren't the first of
+    the day, there's still a popup, just 5 min ahead — enough to walk to
+    a different room without an interruption anywhere close to class start.
 """
 from __future__ import annotations
 
@@ -33,7 +36,8 @@ CALENDAR_TIMEZONE = "Europe/Moscow"
 EVENT_COLOR_OFFLINE = "7"  # Peacock (blue)
 EVENT_COLOR_ONLINE = "10"  # Basil (green)
 
-REMINDER_MINUTES_OFFLINE = 90
+REMINDER_MINUTES_OFFLINE_FIRST = 90
+REMINDER_MINUTES_OFFLINE_LATER = 5
 REMINDER_MINUTES_ONLINE = 30
 
 _LINK_LABELS = {
@@ -65,10 +69,7 @@ def _guess_link_label(url: str) -> str:
 def _build_location(row: sqlite3.Row) -> str:
     if _is_online(row):
         return "Онлайн"
-    parts = [row["building"]]
-    if row["auditorium"]:
-        parts.append(f"ауд. {row['auditorium']}")
-    return ", ".join(p for p in parts if p)
+    return row["auditorium"] or ""
 
 
 def _build_description(row: sqlite3.Row) -> str:
@@ -91,9 +92,12 @@ def _build_description(row: sqlite3.Row) -> str:
 
 
 def _build_reminders(row: sqlite3.Row) -> dict:
-    if not row["is_day_first"]:
-        return {"useDefault": False, "overrides": []}
-    minutes = REMINDER_MINUTES_ONLINE if _is_online(row) else REMINDER_MINUTES_OFFLINE
+    if _is_online(row):
+        if not row["is_day_first"]:
+            return {"useDefault": False, "overrides": []}
+        minutes = REMINDER_MINUTES_ONLINE
+    else:
+        minutes = REMINDER_MINUTES_OFFLINE_FIRST if row["is_day_first"] else REMINDER_MINUTES_OFFLINE_LATER
     return {"useDefault": False, "overrides": [{"method": "popup", "minutes": minutes}]}
 
 
