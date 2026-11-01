@@ -24,6 +24,7 @@ from pathlib import Path
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from google.oauth2 import service_account
 
 from .config import Settings
 from .db import clear_google_event, connect, mark_synced, pending_calendar_changes, recompute_day_first
@@ -133,7 +134,20 @@ def _ensure_calendar(service, calendar_id_path: Path, calendar_name: str) -> str
 
 
 def sync_calendar(settings: Settings) -> CalendarSyncResult:
-    creds = get_credentials(settings.google_client_secret, settings.google_token_path)
+    if settings.google_service_account_file:
+        if not settings.google_calendar_id_path.exists():
+            raise RuntimeError(
+                "Service account mode requires an existing shared calendar: "
+                f"save its Calendar ID to {settings.google_calendar_id_path}"
+            )
+        if not settings.google_calendar_id_path.read_text(encoding="utf-8").strip():
+            raise RuntimeError("Calendar ID file is empty")
+        creds = service_account.Credentials.from_service_account_file(
+            str(settings.google_service_account_file),
+            scopes=["https://www.googleapis.com/auth/calendar.events"],
+        )
+    else:
+        creds = get_credentials(settings.google_client_secret, settings.google_token_path)
     service = build("calendar", "v3", credentials=creds)
     calendar_id = _ensure_calendar(service, settings.google_calendar_id_path, settings.google_calendar_name)
 

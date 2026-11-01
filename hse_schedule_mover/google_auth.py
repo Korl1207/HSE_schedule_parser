@@ -1,9 +1,8 @@
 """Google Calendar OAuth: one-time interactive browser consent, then a
 cached refresh token so every later run is unattended.
 
-This is a personal, unpublished OAuth client (consent screen left in
-"Testing" status) authorized directly by the calendar's owner, so no Google
-app-verification review is needed — the full `calendar` scope is fine here.
+In OAuth Testing mode, Calendar refresh tokens expire after seven days.
+For unattended server operation use the service account mode in calendar_sync.
 """
 from __future__ import annotations
 

@@ -27,6 +27,7 @@ class Settings:
     google_token_path: Path
     google_calendar_id_path: Path
     google_calendar_name: str
+    google_service_account_file: Path | None = None
 
 
 def load_settings() -> Settings:
@@ -55,4 +56,9 @@ def load_settings() -> Settings:
             os.environ.get("GOOGLE_CALENDAR_ID_PATH", state_dir / "google_calendar_id.txt")
         ),
         google_calendar_name=os.environ.get("GOOGLE_CALENDAR_NAME", "HSE Пары"),
+        google_service_account_file=(
+            Path(os.environ["GOOGLE_SERVICE_ACCOUNT_FILE"])
+            if os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+            else None
+        ),
     )

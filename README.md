@@ -41,6 +41,49 @@ cp .env.example .env
 
 ### Google Calendar
 
+#### Автономная работа через сервисный аккаунт
+
+В этом режиме не нужны публикация OAuth-приложения и еженедельный вход.
+Краткоживущие токены библиотека получает автоматически по JSON-ключу.
+
+1. В Google Cloud Console включи **Google Calendar API** в своём проекте.
+2. Открой **IAM & Admin → Service Accounts → Create service account**.
+   Назови аккаунт, например `hse-calendar`. Роли проекта для доступа к календарю
+   назначать не нужно: права будут выданы на самом календаре.
+3. Открой созданный аккаунт → **Keys → Add key → Create new key → JSON**.
+   Сохрани файл на сервере как
+   `/opt/hse_schedule_mover/data/state/service_account.json` и ограничь доступ:
+   `chmod 600 /opt/hse_schedule_mover/data/state/service_account.json`.
+   Файл должен читаться пользователем, от которого запускается синхронизация.
+   Не добавляй ключ в Git и не публикуй его содержимое.
+4. Скопируй адрес сервисного аккаунта (`client_email` в JSON, заканчивается
+   на `iam.gserviceaccount.com`). В веб-версии Google Calendar открой настройки
+   существующего календаря **HSE Пары → Доступ для отдельных пользователей**,
+   добавь этот адрес с правом **Внесение изменений в мероприятия**.
+5. Сохрани прежний `data/state/google_calendar_id.txt`. Если файла нет,
+   скопируй **Идентификатор календаря** из раздела **Интеграция календаря**
+   в этот файл одной строкой. Используй отдельный календарь для расписания.
+6. Добавь в серверный `.env`:
+   ```dotenv
+   GOOGLE_SERVICE_ACCOUNT_FILE=/opt/hse_schedule_mover/data/state/service_account.json
+   GOOGLE_CALENDAR_ID_PATH=/opt/hse_schedule_mover/data/state/google_calendar_id.txt
+   ```
+7. После обновления кода запусти `python3 run_sync.py`. Для запуска каждый час:
+   ```cron
+   0 * * * * cd /opt/hse_schedule_mover && .venv/bin/python3 run_sync.py >> data/sync.log 2>&1
+   ```
+
+При переходе сохраняй прежнюю БД `data/schedule.db` и ID календаря:
+в БД хранятся соответствия пар и событий. Старый OAuth-токен в этом режиме
+не используется. Ошибка 403 обычно означает недостаточные права или
+отключённый Calendar API; 404 — неверный ID календаря или отсутствие доступа.
+Автономность сохраняется, пока действуют ключ, доступ к календарю и учётная запись HSE.
+
+Документация Google: [создание JSON-ключа](https://docs.cloud.google.com/iam/docs/keys-create-delete),
+[права доступа к календарю](https://developers.google.com/workspace/calendar/api/concepts/sharing).
+
+#### Альтернатива: пользовательский OAuth
+
 1. В [Google Cloud Console](https://console.cloud.google.com/) - новый проект → включить **Google Calendar API**.
 2. OAuth consent screen → User type **External** → добавь себя (или того, чей календарь) в **Test users**.
 3. Credentials -> **Create Credentials → OAuth client ID** -> тип **Desktop app** -> скачать JSON.
@@ -49,7 +92,10 @@ cp .env.example .env
    ```bash
    python3 run_calendar_sync.py
    ```
-   Откроется браузер, попросит войти и подтвердить доступ -> дальше это не понадобится, токен сохранится.
+   Откроется браузер, попросит войти и подтвердить доступ, токен сохранится.
+   В режиме **Testing** refresh token для Calendar истекает через **7 дней**,
+   после чего потребуется повторная авторизация. Для автономной работы используй
+   сервисный аккаунт, описанный выше.
 
 ### Если `saml.hse.ru` недоступен с сервера
 
